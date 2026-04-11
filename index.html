@@ -17,7 +17,7 @@
         <div id="search-container">
             <input type="text" id="search-input" placeholder="Search for songs on YouTube...">
             <label id="karaoke-toggle" class="toggle-switch">
-                <input type="checkbox" id="karaoke-mode" checked>
+                <input type="checkbox" id="karaoke-mode">
                 <span class="toggle-slider">+Karaoke</span>
             </label>
             <button id="search-button">Search</button>
@@ -28,7 +28,7 @@
         <div id="player-container" class="hidden">
             <div id="player-header">
                 <div id="now-playing">
-                    <h2 id="song-title"></h2>
+                    <h2 id="song-title" style="cursor: pointer;" title="Click to go back to home"></h2>
                     <p id="song-artist"></p>
                 </div>
                 <button id="btn-toggle-player" title="Show/Hide Player">🎬</button>
