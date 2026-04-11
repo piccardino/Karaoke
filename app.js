@@ -56,6 +56,8 @@ class KaraokeApp {
         document.getElementById('btn-play').addEventListener('click', () => this.play());
         document.getElementById('btn-pause').addEventListener('click', () => this.pause());
         document.getElementById('btn-stop').addEventListener('click', () => this.stop());
+        document.getElementById('btn-toggle-player').addEventListener('click', () => this.togglePlayer());
+        document.getElementById('btn-search-original').addEventListener('click', () => this.searchOriginalSong());
 
         // Handle browser back button
         window.addEventListener('popstate', (e) => {
@@ -81,16 +83,22 @@ class KaraokeApp {
         });
     }
     
-    async search(queryOverride = null, appendKaraoke = true) {
+    async search(queryOverride = null, appendKaraoke = null) {
         const query = queryOverride || document.getElementById('search-input').value.trim();
         if (!query) return;
 
-        // Automatically append "karaoke" to the search query
+        // Check if karaoke mode is enabled (use parameter if provided, otherwise check toggle)
+        const shouldAppendKaraoke = appendKaraoke !== null
+            ? appendKaraoke
+            : document.getElementById('karaoke-mode').checked;
+
+        // Automatically append "karaoke" to the search query if toggle is on
         const karaokeQuery = query.toLowerCase().includes('karaoke')
             ? query
-            : appendKaraoke ? `${query} karaoke` : query;
+            : shouldAppendKaraoke ? `${query} karaoke` : query;
 
         console.log('Searching for:', query);
+        console.log('Karaoke mode:', shouldAppendKaraoke ? 'ON' : 'OFF');
         console.log('Karaoke query:', karaokeQuery);
         console.log('DEMO_MODE:', DEMO_MODE);
         console.log('API Key:', YOUTUBE_API_KEY ? YOUTUBE_API_KEY.substring(0, 10) + '...' : 'not set');
@@ -266,6 +274,21 @@ class KaraokeApp {
             this.player.stopVideo();
         }
     }
+
+    togglePlayer() {
+        const content = document.getElementById('player-content');
+        const btn = document.getElementById('btn-toggle-player');
+
+        if (content.classList.contains('collapsed')) {
+            content.classList.remove('collapsed');
+            btn.textContent = '🎬';
+            btn.title = 'Hide Player';
+        } else {
+            content.classList.add('collapsed');
+            btn.textContent = '🎥';
+            btn.title = 'Show Player';
+        }
+    }
     
     async loadLyrics(songTitle, artist = '') {
         const lyricsContainer = document.getElementById('lyrics-container');
@@ -281,27 +304,55 @@ class KaraokeApp {
         lyricsContainer.classList.remove('hidden');
 
         try {
-            // Try to fetch lyrics from lyrics.ovh API (free, no API key needed)
-            // The API endpoint is: https://api.lyrics.ovh/v1/:artist/:title
             let lyrics = null;
 
-            // Try multiple search strategies
-            if (artist && songTitle) {
-                // Strategy 1: Use artist and extracted title
-                const cleanArtist = artist.split(' - ')[0].trim() || artist;
-                const cleanTitle = songTitle.split(' - ').pop().trim();
-                lyrics = await this.fetchLyrics(cleanArtist, cleanTitle);
+            // Clean up artist and title for better matching
+            const cleanArtist = this.cleanArtistName(artist);
+            const cleanTitle = this.cleanSongTitle(songTitle);
+
+            console.log('Searching lyrics for:', { artist: cleanArtist, title: cleanTitle });
+
+            // Strategy 1: Lyrics.ovh with artist + title
+            if (!lyrics && cleanArtist && cleanTitle) {
+                lyrics = await this.fetchFromLyricsOvh(cleanArtist, cleanTitle);
             }
 
-            if (!lyrics && songTitle) {
-                // Strategy 2: Try with just the song title
-                const cleanTitle = songTitle.split(' - ').pop().trim();
-                lyrics = await this.fetchLyrics('', cleanTitle);
+            // Strategy 2: Lyrics.ovh with just title
+            if (!lyrics && cleanTitle) {
+                lyrics = await this.fetchFromLyricsOvh('', cleanTitle);
             }
 
+            // Strategy 3: Vagalume API (alternative free API)
+            if (!lyrics && cleanArtist && cleanTitle) {
+                lyrics = await this.fetchFromVagalume(cleanArtist, cleanTitle);
+            }
+
+            // Strategy 4: Try YouTube to get original title, then search lyrics
             if (!lyrics) {
-                // Strategy 3: Try with the full song title
-                lyrics = await this.fetchLyrics('', songTitle);
+                lyrics = await this.fetchLyricsFromYouTubeTitle(cleanTitle);
+            }
+
+            // Strategy 5: Try variant combinations with Lyrics.ovh
+            if (!lyrics) {
+                const variants = this.getTitleVariants(cleanTitle);
+                for (const variant of variants) {
+                    lyrics = await this.fetchFromLyricsOvh(cleanArtist, variant);
+                    if (lyrics) break;
+                }
+            }
+
+            // Strategy 6: Vagalume with variants
+            if (!lyrics) {
+                const variants = this.getTitleVariants(cleanTitle);
+                for (const variant of variants) {
+                    lyrics = await this.fetchFromVagalume(cleanArtist, variant);
+                    if (lyrics) break;
+                }
+            }
+
+            // Strategy 7: Try lyrics.wiki API
+            if (!lyrics) {
+                lyrics = await this.fetchFromLyricsWiki(cleanArtist, cleanTitle);
             }
 
             if (lyrics) {
@@ -316,10 +367,73 @@ class KaraokeApp {
         }
     }
 
-    async fetchLyrics(artist, title) {
+    cleanArtistName(artist) {
+        if (!artist) return '';
+        return artist
+            .split(' - ')[0]
+            .split(' ft. ')[0]
+            .split(' feat. ')[0]
+            .split(' with ')[0]
+            .split(' & ')[0]
+            .trim();
+    }
+
+    cleanSongTitle(title) {
+        if (!title) return '';
+        return title
+            // Remove karaoke-related terms
+            .replace(/\(?karaoke\)?/gi, '')
+            .replace(/\(?karaoke\s*version\)?/gi, '')
+            .replace(/\(?karaoke\s*track\)?/gi, '')
+            .replace(/\(instrumental\)/gi, '')
+            .replace(/\(sing\s*along\)/gi, '')
+            .replace(/\(lyrics?\)/gi, '')
+            .replace(/\(with\s*lyrics?\)/gi, '')
+            // Remove common video type tags
+            .replace(/\(official\s*(music\s*)?video\)/gi, '')
+            .replace(/\(official\s*(audio|lyric(s)?)\)/gi, '')
+            .replace(/\(lyric(s)?\s*video\)/gi, '')
+            .replace(/\(feat\..*?\)/gi, '')
+            .replace(/\(ft\..*?\)/gi, '')
+            .split(' - ').pop()
+            .replace(/\s+/g, ' ')  // Clean up multiple spaces
+            .trim();
+    }
+
+    getTitleVariants(title) {
+        const variants = [title];
+
+        // Remove common suffixes
+        const cleaned = title
+            .replace(/\s*\(.*?\)\s*/g, '')
+            .replace(/\s*-\s*.*$/g, '')
+            .trim();
+
+        if (cleaned && cleaned !== title) {
+            variants.push(cleaned);
+        }
+
+        // Try without "The" prefix
+        if (title.startsWith('The ')) {
+            variants.push(title.substring(4));
+        }
+
+        // Try first few words only
+        const words = title.split(' ');
+        if (words.length > 3) {
+            variants.push(words.slice(0, 3).join(' '));
+            variants.push(words.slice(0, 4).join(' '));
+        }
+
+        return [...new Set(variants.filter(v => v.length > 0))];
+    }
+
+    async fetchFromLyricsOvh(artist, title) {
+        if (!title) return null;
+
         try {
             const url = `https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`;
-            console.log('Fetching lyrics from:', url);
+            console.log('Trying Lyrics.ovh:', url);
 
             const response = await fetch(url);
 
@@ -329,15 +443,168 @@ class KaraokeApp {
 
             const data = await response.json();
 
-            if (data.lyrics) {
-                return data.lyrics;
+            if (data.lyrics && data.lyrics.trim().length > 0) {
+                console.log('✓ Found lyrics on Lyrics.ovh');
+                return this.cleanLyricsText(data.lyrics);
             }
 
             return null;
         } catch (error) {
-            console.log('Lyrics fetch failed:', error.message);
+            console.log('Lyrics.ovh failed:', error.message);
             return null;
         }
+    }
+
+    async fetchFromVagalume(artist, title) {
+        if (!title) return null;
+
+        try {
+            // Vagalume API - free, no key needed
+            const url = `https://api.vagalume.com.br/search.php?q=${encodeURIComponent(artist + ' ' + title)}&limit=1`;
+            console.log('Trying Vagalume:', url);
+
+            const response = await fetch(url);
+
+            if (!response.ok) {
+                return null;
+            }
+
+            const data = await response.json();
+
+            if (data.type === 'exact' || data.type === 'aprox') {
+                const song = data.mus[0];
+                if (song && song.text && song.text.trim().length > 0) {
+                    console.log('✓ Found lyrics on Vagalume');
+                    return this.cleanLyricsText(song.text);
+                }
+            }
+
+            return null;
+        } catch (error) {
+            console.log('Vagalume failed:', error.message);
+            return null;
+        }
+    }
+
+    async fetchLyricsFromYouTubeTitle(title) {
+        // Try to extract the original song name from a YouTube karaoke title
+        // e.g. "Never Gonna Give You Up (Karaoke Version)" -> "Never Gonna Give You Up"
+        if (!title) return null;
+
+        try {
+            // First, search YouTube for the original song (without karaoke)
+            const originalTitle = title
+                .replace(/\(?karaoke\)?/gi, '')
+                .replace(/\(?karaoke\s*version\)?/gi, '')
+                .replace(/\(?instrumental\)?/gi, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            if (!originalTitle || originalTitle.length < 3) {
+                return null;
+            }
+
+            console.log('Searching YouTube for original title:', originalTitle);
+
+            // Search YouTube for the original song to get the proper artist
+            if (DEMO_MODE) {
+                return null; // Can't do this in demo mode
+            }
+
+            const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(originalTitle)}&type=video&maxResults=5&key=${YOUTUBE_API_KEY}`;
+            const response = await fetch(searchUrl);
+
+            if (!response.ok) {
+                return null;
+            }
+
+            const data = await response.json();
+
+            if (!data.items || data.items.length === 0) {
+                return null;
+            }
+
+            // Try to find a video that's NOT karaoke (look for official video/audio)
+            let bestMatch = null;
+            for (const item of data.items) {
+                const videoTitle = item.snippet.title.toLowerCase();
+                const channel = item.snippet.channelTitle.toLowerCase();
+
+                // Skip karaoke results
+                if (videoTitle.includes('karaoke') || videoTitle.includes('instrumental')) {
+                    continue;
+                }
+
+                // Prefer official videos
+                if (videoTitle.includes('official') || videoTitle.includes('video')) {
+                    bestMatch = item;
+                    break;
+                }
+
+                if (!bestMatch) {
+                    bestMatch = item;
+                }
+            }
+
+            if (!bestMatch) {
+                return null;
+            }
+
+            const videoTitle = bestMatch.snippet.title;
+            const artist = bestMatch.snippet.channelTitle;
+
+            console.log('Found original video:', videoTitle, 'by', artist);
+
+            // Now try to fetch lyrics with the proper artist and title
+            const cleanTitle = this.cleanSongTitle(videoTitle);
+            const cleanArtist = this.cleanArtistName(artist);
+
+            // Try Lyrics.ovh
+            const lyrics = await this.fetchFromLyricsOvh(cleanArtist, cleanTitle);
+            if (lyrics) {
+                console.log('✓ Found lyrics using YouTube search');
+                return lyrics;
+            }
+
+            // Try Vagalume
+            const vagalumeLyrics = await this.fetchFromVagalume(cleanArtist, cleanTitle);
+            if (vagalumeLyrics) {
+                console.log('✓ Found lyrics on Vagalume via YouTube search');
+                return vagalumeLyrics;
+            }
+
+            return null;
+        } catch (error) {
+            console.log('YouTube lyrics search failed:', error.message);
+            return null;
+        }
+    }
+
+    async fetchFromLyricsWiki(artist, title) {
+        if (!title) return null;
+
+        try {
+            // lyrics.fandom.com wiki API (unofficial)
+            const song = `${artist} - ${title}`.replace(/\s+/g, '_');
+            const url = `https://lyrics.fandom.com/wiki/${song}`;
+
+            // Since we can't directly scrape websites due to CORS,
+            // we'll use a CORS proxy or skip this for now
+            // This is a placeholder for future implementation
+            console.log('Lyrics Wiki requires server-side scraping - skipping');
+            return null;
+        } catch (error) {
+            console.log('Lyrics Wiki failed:', error.message);
+            return null;
+        }
+    }
+
+    cleanLyricsText(text) {
+        return text
+            .replace(/\r\n/g, '\n')
+            .replace(/\r/g, '\n')
+            .replace(/\n{3,}/g, '\n\n') // Max 2 consecutive newlines
+            .trim();
     }
 
     displayLyrics(lyricsText) {
@@ -412,12 +679,38 @@ class KaraokeApp {
         document.getElementById('player-container').classList.add('hidden');
         document.getElementById('lyrics-container').classList.add('hidden');
         document.getElementById('results-container').classList.add('hidden');
-        
+
         // Stop any playing video
         if (this.player && this.player.stopVideo) {
             this.player.stopVideo();
         }
         this.isPlaying = false;
+    }
+
+    searchOriginalSong() {
+        // Search for the original song (without karaoke) using the current title
+        const currentTitle = document.getElementById('song-title').textContent;
+        const currentArtist = document.getElementById('song-artist').textContent;
+
+        if (!currentTitle) return;
+
+        // Clean the title to get the original song name
+        const originalTitle = this.cleanSongTitle(currentTitle);
+        const originalArtist = this.cleanArtistName(currentArtist);
+
+        // Set the search input and perform search without karaoke toggle
+        document.getElementById('search-input').value = `${originalArtist} - ${originalTitle}`;
+
+        // Temporarily disable karaoke mode for this search
+        const karaokeToggle = document.getElementById('karaoke-mode');
+        const wasChecked = karaokeToggle.checked;
+        karaokeToggle.checked = false;
+
+        // Search without karaoke
+        this.search(`${originalArtist} - ${originalTitle}`, false).then(() => {
+            // Restore karaoke toggle state
+            karaokeToggle.checked = wasChecked;
+        });
     }
     
     animateLyrics() {
