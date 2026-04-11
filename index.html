@@ -40,6 +40,25 @@
                     <button id="btn-pause">⏸ Pause</button>
                     <button id="btn-stop">⏹ Stop</button>
                 </div>
+                <div id="audio-controls">
+                    <div class="eq-control">
+                        <label>🎤 Vocal</label>
+                        <input type="range" id="vocal-volume" min="0" max="100" value="100">
+                        <span id="vocal-value">100%</span>
+                    </div>
+                    <div class="eq-control">
+                        <label>🎵 Music</label>
+                        <input type="range" id="music-volume" min="0" max="100" value="100">
+                        <span id="music-value">100%</span>
+                    </div>
+                    <div class="eq-control">
+                        <label>🔊 Bass</label>
+                        <input type="range" id="bass-volume" min="0" max="100" value="100">
+                        <span id="bass-value">100%</span>
+                    </div>
+                    <button id="btn-karaoke-mode" class="karaoke-eq-btn" title="Reduce vocals for karaoke">🎤 Karaoke Mode</button>
+                    <button id="btn-mic" class="karaoke-eq-btn" title="Enable microphone for real-time visualizations">🎙️ Enable Mic</button>
+                </div>
             </div>
         </div>
         

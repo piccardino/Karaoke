@@ -6,7 +6,19 @@ class KaraokeApp {
         this.isPlaying = false;
         this.visualizer = null;
         this.simulatedTime = 0;
-        
+        this.audioElement = null;
+
+        // Pagination
+        this.currentPage = 0;
+        this.currentQuery = '';
+        this.allResults = [];
+        this.resultsPerPage = 10;
+
+        // Lyrics synchronization
+        this.syncedLyrics = []; // Array of {time, text}
+        this.currentLyricIndex = 0;
+        this.lyricsSyncInterval = null;
+
         this.init();
     }
     
@@ -59,6 +71,13 @@ class KaraokeApp {
         document.getElementById('btn-toggle-player').addEventListener('click', () => this.togglePlayer());
         document.getElementById('btn-search-original').addEventListener('click', () => this.searchOriginalSong());
 
+        // EQ Controls
+        document.getElementById('vocal-volume').addEventListener('input', (e) => this.updateEQ());
+        document.getElementById('music-volume').addEventListener('input', (e) => this.updateEQ());
+        document.getElementById('bass-volume').addEventListener('input', (e) => this.updateEQ());
+        document.getElementById('btn-karaoke-mode').addEventListener('click', () => this.toggleKaraokeEQ());
+        document.getElementById('btn-mic').addEventListener('click', () => this.enableMicrophone());
+
         // Handle browser back button
         window.addEventListener('popstate', (e) => {
             if (e.state && e.state.page === 'search-results') {
@@ -96,6 +115,11 @@ class KaraokeApp {
         const karaokeQuery = query.toLowerCase().includes('karaoke')
             ? query
             : shouldAppendKaraoke ? `${query} karaoke` : query;
+
+        // Reset pagination for new search
+        this.currentPage = 0;
+        this.allResults = [];
+        this.currentQuery = karaokeQuery;
 
         console.log('Searching for:', query);
         console.log('Karaoke mode:', shouldAppendKaraoke ? 'ON' : 'OFF');
@@ -135,8 +159,10 @@ class KaraokeApp {
                 results = data.items || [];
             }
 
-            this.displayResults(results);
-            
+            // Store all results and display first page
+            this.allResults = results;
+            this.displayResultsPage();
+
             // Push state to history so back button returns to results
             history.pushState({ page: 'search-results', query: karaokeQuery }, '', `?search=${encodeURIComponent(karaokeQuery)}`);
 
@@ -153,29 +179,35 @@ class KaraokeApp {
             if (results.length === 0) {
                 results = DEMO_SEARCH_RESULTS;
             }
-            this.displayResults(results);
-            
+            this.allResults = results;
+            this.displayResultsPage();
+
             // Push state to history for fallback too
             history.pushState({ page: 'search-results', query: karaokeQuery }, '', `?search=${encodeURIComponent(karaokeQuery)}`);
         }
     }
-    
-    displayResults(results) {
+
+    displayResultsPage() {
         const container = document.getElementById('results-container');
         container.innerHTML = '';
         container.classList.remove('hidden');
-        
-        if (results.length === 0) {
-            container.innerHTML = '<p class="no-results">No results found. Try another search!</p>';
+
+        const startIndex = this.currentPage * this.resultsPerPage;
+        const endIndex = startIndex + this.resultsPerPage;
+        const pageResults = this.allResults.slice(startIndex, endIndex);
+
+        if (pageResults.length === 0) {
+            container.innerHTML = '<p class="no-results">No more results.</p>';
             return;
         }
-        
-        results.forEach(video => {
+
+        // Display results for current page
+        pageResults.forEach(video => {
             const videoId = video.id.videoId;
             const title = video.snippet.title;
             const channel = video.snippet.channelTitle;
             const thumbnail = video.snippet.thumbnails.default.url;
-            
+
             const resultItem = document.createElement('div');
             resultItem.className = 'result-item';
             resultItem.innerHTML = `
@@ -185,10 +217,60 @@ class KaraokeApp {
                     <p>${channel}</p>
                 </div>
             `;
-            
+
             resultItem.addEventListener('click', () => this.selectVideo(videoId, title, channel));
             container.appendChild(resultItem);
         });
+
+        // Add pagination controls
+        const totalPages = Math.ceil(this.allResults.length / this.resultsPerPage);
+        if (totalPages > 1) {
+            const paginationDiv = document.createElement('div');
+            paginationDiv.className = 'pagination-container';
+
+            // Previous button
+            if (this.currentPage > 0) {
+                const prevBtn = document.createElement('button');
+                prevBtn.className = 'pagination-btn';
+                prevBtn.textContent = '← Previous';
+                prevBtn.addEventListener('click', () => {
+                    this.currentPage--;
+                    this.displayResultsPage();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                });
+                paginationDiv.appendChild(prevBtn);
+            }
+
+            // Page info
+            const pageInfo = document.createElement('span');
+            pageInfo.className = 'page-info';
+            pageInfo.textContent = `Page ${this.currentPage + 1} of ${totalPages}`;
+            paginationDiv.appendChild(pageInfo);
+
+            // Next button
+            if (this.currentPage < totalPages - 1) {
+                const nextBtn = document.createElement('button');
+                nextBtn.className = 'pagination-btn';
+                nextBtn.textContent = 'Next →';
+                nextBtn.addEventListener('click', () => {
+                    this.currentPage++;
+                    this.displayResultsPage();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                });
+                paginationDiv.appendChild(nextBtn);
+            }
+
+            container.appendChild(paginationDiv);
+        }
+    }
+
+    loadMoreResults() {
+        // For YouTube API, we can fetch next page using pageToken
+        // For now, we'll show a message that more results are available
+        if (this.allResults.length >= this.resultsPerPage) {
+            this.currentPage++;
+            this.displayResultsPage();
+        }
     }
     
     selectVideo(videoId, title, artist) {
@@ -207,12 +289,12 @@ class KaraokeApp {
 
         // Load lyrics
         this.loadLyrics(title, artist);
-        
+
         // Push state for player so back button returns to search results
         const stateUrl = `?play=${videoId}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`;
         history.pushState({ page: 'player', videoId, title, artist }, '', stateUrl);
     }
-    
+
     initPlayer(videoId) {
         if (this.player) {
             this.player.loadVideoById(videoId);
@@ -229,10 +311,48 @@ class KaraokeApp {
                 events: {
                     'onReady': (event) => {
                         console.log('Player ready');
+                        this.connectAudioToVisualizer();
                     },
                     'onStateChange': (event) => this.onPlayerStateChange(event)
                 }
             });
+        }
+    }
+
+    connectAudioToVisualizer() {
+        // Try to get the audio element from the YouTube player iframe
+        // Note: Due to CORS restrictions, we can't directly access YouTube audio
+        // We'll use a simulated audio reaction for now
+        // For full audio analysis, you would need to use the Web Audio API with a local audio file
+
+        // Alternative: Use the microphone or system audio (requires user permission)
+        // For now, we'll use the simulated mode in the visualizer
+
+        console.log('Using simulated audio visualization');
+        console.log('Tip: For real audio analysis, use microphone input or local files');
+
+        // If you want to use microphone:
+        // this.connectMicrophoneToVisualizer();
+    }
+
+    async connectMicrophoneToVisualizer() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(stream);
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 128;
+
+            source.connect(analyser);
+
+            // Pass analyser to visualizer
+            this.visualizer.analyser = analyser;
+            this.visualizer.frequencyData = new Uint8Array(analyser.frequencyBinCount);
+            this.visualizer.isAudioConnected = true;
+
+            console.log('✓ Microphone connected to visualizer');
+        } catch (error) {
+            console.log('Microphone access denied:', error.message);
         }
     }
     
@@ -241,20 +361,75 @@ class KaraokeApp {
         if (event.data === YT.PlayerState.PLAYING) {
             this.isPlaying = true;
             this.animateVisualizer();
+            // Resume lyrics sync if available
+            if (this.syncedLyrics.length > 0) {
+                this.startLyricsSync();
+            }
         } else if (event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.ENDED) {
             this.isPlaying = false;
+            // Pause lyrics sync
+            if (this.lyricsSyncInterval) {
+                clearInterval(this.lyricsSyncInterval);
+                this.lyricsSyncInterval = null;
+            }
         }
     }
     
     animateVisualizer() {
         if (!this.isPlaying) return;
-        
-        // Simulate audio energy with oscillating values
-        this.simulatedTime += 0.05;
+
+        // If microphone is connected, visualizer will use real audio
+        // Otherwise, use simulated mode (already handled in visualizer.js)
         const energy = 0.5 + Math.sin(this.simulatedTime) * 0.3 + Math.random() * 0.2;
         this.visualizer.setAudioEnergy(energy);
-        
+
         requestAnimationFrame(() => this.animateVisualizer());
+    }
+
+    updateEQ() {
+        const vocal = document.getElementById('vocal-volume').value;
+        const music = document.getElementById('music-volume').value;
+        const bass = document.getElementById('bass-volume').value;
+
+        document.getElementById('vocal-value').textContent = vocal + '%';
+        document.getElementById('music-value').textContent = music + '%';
+        document.getElementById('bass-value').textContent = bass + '%';
+
+        // Note: Due to YouTube CORS restrictions, we can't directly manipulate audio
+        // These controls are visual feedback for when you use local audio files
+        // For YouTube videos, the system volume is the only way to control audio
+
+        console.log('EQ Settings - Vocal:', vocal, 'Music:', music, 'Bass:', bass);
+    }
+
+    toggleKaraokeEQ() {
+        const btn = document.getElementById('btn-karaoke-mode');
+        const isActive = btn.classList.toggle('active');
+
+        if (isActive) {
+            // Karaoke mode: reduce vocals, keep music
+            document.getElementById('vocal-volume').value = 30;
+            document.getElementById('music-volume').value = 100;
+            document.getElementById('bass-volume').value = 80;
+            btn.textContent = '🎤 Karaoke ON';
+        } else {
+            // Normal mode
+            document.getElementById('vocal-volume').value = 100;
+            document.getElementById('music-volume').value = 100;
+            document.getElementById('bass-volume').value = 100;
+            btn.textContent = '🎤 Karaoke Mode';
+        }
+
+        this.updateEQ();
+    }
+
+    async enableMicrophone() {
+        try {
+            await this.connectMicrophoneToVisualizer();
+            alert('Microphone connected! Visualizations will now react to audio.');
+        } catch (error) {
+            alert('Could not access microphone. Please allow microphone access and try again.');
+        }
     }
     
     play() {
@@ -312,7 +487,16 @@ class KaraokeApp {
 
             console.log('Searching lyrics for:', { artist: cleanArtist, title: cleanTitle });
 
-            // Strategy 1: Lyrics.ovh with artist + title
+            // Strategy 1: Try lrclib.net for SYNCED lyrics (with timestamps)
+            if (!lyrics && cleanArtist && cleanTitle) {
+                const syncedResult = await this.fetchSyncedLyrics(cleanArtist, cleanTitle);
+                if (syncedResult) {
+                    lyrics = syncedResult.lyrics;
+                    this.syncedLyrics = syncedResult.lines; // Store synced lyrics
+                }
+            }
+
+            // Strategy 2: Lyrics.ovh with artist + title (plain text)
             if (!lyrics && cleanArtist && cleanTitle) {
                 lyrics = await this.fetchFromLyricsOvh(cleanArtist, cleanTitle);
             }
@@ -426,6 +610,137 @@ class KaraokeApp {
         }
 
         return [...new Set(variants.filter(v => v.length > 0))];
+    }
+
+    async fetchSyncedLyrics(artist, title) {
+        if (!title) return null;
+
+        try {
+            // lrclib.net provides synced lyrics with timestamps (LRC format)
+            const searchUrl = `https://lrclib.net/api/search?track_name=${encodeURIComponent(title)}&artist_name=${encodeURIComponent(artist)}`;
+            console.log('Trying LrcLib for synced lyrics:', searchUrl);
+
+            const response = await fetch(searchUrl);
+
+            if (!response.ok) {
+                return null;
+            }
+
+            const data = await response.json();
+
+            if (data && data.length > 0) {
+                // Find the best match with synced lyrics
+                for (const track of data) {
+                    if (track.syncedLyrics) {
+                        console.log('✓ Found synced lyrics on LrcLib');
+                        return {
+                            lyrics: track.plainLyrics || track.name,
+                            lines: this.parseLRC(track.syncedLyrics)
+                        };
+                    }
+                }
+            }
+
+            return null;
+        } catch (error) {
+            console.log('LrcLib failed:', error.message);
+            return null;
+        }
+    }
+
+    parseLRC(lrcText) {
+        // Parse LRC format: [mm:ss.xx] lyric text
+        const lines = [];
+        const regex = /\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)/g;
+        let match;
+
+        while ((match = regex.exec(lrcText)) !== null) {
+            const minutes = parseInt(match[1]);
+            const seconds = parseInt(match[2]);
+            const milliseconds = parseInt(match[3].padEnd(3, '0'));
+            const time = minutes * 60 + seconds + milliseconds / 1000;
+            const text = match[4].trim();
+
+            if (text) {
+                lines.push({ time, text });
+            }
+        }
+
+        console.log('Parsed', lines.length, 'lyric lines with timestamps');
+        return lines;
+    }
+
+    startLyricsSync() {
+        if (!this.player || !this.syncedLyrics || this.syncedLyrics.length === 0) {
+            console.log('No synced lyrics available');
+            return;
+        }
+
+        console.log('Starting lyrics sync with', this.syncedLyrics.length, 'lines');
+        this.currentLyricIndex = 0;
+
+        // Clear existing interval
+        if (this.lyricsSyncInterval) {
+            clearInterval(this.lyricsSyncInterval);
+        }
+
+        // Update lyrics every 100ms
+        this.lyricsSyncInterval = setInterval(() => this.updateSyncedLyrics(), 100);
+    }
+
+    updateSyncedLyrics() {
+        if (!this.player || !this.syncedLyrics.length) return;
+
+        try {
+            const currentTime = this.player.getCurrentTime();
+            const lines = this.syncedLyrics;
+
+            // Find current lyric line based on video time
+            let newIndex = 0;
+            for (let i = 0; i < lines.length; i++) {
+                if (currentTime >= lines[i].time) {
+                    newIndex = i;
+                } else {
+                    break;
+                }
+            }
+
+            // Update display if line changed
+            if (newIndex !== this.currentLyricIndex) {
+                this.currentLyricIndex = newIndex;
+                this.highlightCurrentLyric(newIndex);
+            }
+        } catch (error) {
+            console.log('Lyrics sync error:', error);
+        }
+    }
+
+    highlightCurrentLyric(index) {
+        const lines = document.querySelectorAll('.lyric-line');
+        lines.forEach((line, i) => {
+            line.classList.remove('active');
+            if (i === index) {
+                line.classList.add('active');
+
+                // Auto-scroll to current lyric
+                const container = document.querySelector('.demo-lyrics');
+                if (container) {
+                    const lineTop = line.offsetTop;
+                    const containerHeight = container.clientHeight;
+                    container.scrollTo({
+                        top: lineTop - containerHeight / 2,
+                        behavior: 'smooth'
+                    });
+                }
+            }
+        });
+    }
+
+    stopLyricsSync() {
+        if (this.lyricsSyncInterval) {
+            clearInterval(this.lyricsSyncInterval);
+            this.lyricsSyncInterval = null;
+        }
     }
 
     async fetchFromLyricsOvh(artist, title) {
@@ -610,28 +925,47 @@ class KaraokeApp {
     displayLyrics(lyricsText) {
         const lyricsDisplay = document.getElementById('lyrics-display');
 
-        // Split lyrics into lines and filter empty ones
-        const lines = lyricsText.split('\n')
-            .map(line => line.trim())
-            .filter(line => line.length > 0);
+        if (this.syncedLyrics.length > 0) {
+            // Display synced lyrics with timestamps
+            const lyricLines = this.syncedLyrics.map((line, index) =>
+                `<p class="lyric-line ${index === 0 ? 'active' : ''}" data-time="${line.time}">${this.escapeHtml(line.text)}</p>`
+            ).join('');
 
-        // Create lyric line elements
-        const lyricLines = lines.map((line, index) =>
-            `<p class="lyric-line ${index === 0 ? 'active' : ''}">${this.escapeHtml(line)}</p>`
-        ).join('');
+            lyricsDisplay.innerHTML = `
+                <h3>🎵 Synced Lyrics</h3>
+                <div class="demo-lyrics synced">
+                    ${lyricLines}
+                </div>
+                <p class="hint" style="margin-top: 15px; font-size: 0.9rem;">
+                    💡 Lyrics are synced with the music!
+                </p>
+            `;
 
-        lyricsDisplay.innerHTML = `
-            <h3>🎵 Lyrics</h3>
-            <div class="demo-lyrics">
-                ${lyricLines}
-            </div>
-            <p class="hint" style="margin-top: 15px; font-size: 0.9rem;">
-                💡 Tip: Lines highlight automatically as you sing along!
-            </p>
-        `;
+            // Start sync when video plays
+            this.startLyricsSync();
+        } else {
+            // Display plain lyrics (no sync)
+            const lines = lyricsText.split('\n')
+                .map(line => line.trim())
+                .filter(line => line.length > 0);
 
-        // Animate lyrics highlighting
-        this.animateLyrics();
+            const lyricLines = lines.map((line, index) =>
+                `<p class="lyric-line ${index === 0 ? 'active' : ''}">${this.escapeHtml(line)}</p>`
+            ).join('');
+
+            lyricsDisplay.innerHTML = `
+                <h3>🎵 Lyrics</h3>
+                <div class="demo-lyrics">
+                    ${lyricLines}
+                </div>
+                <p class="hint" style="margin-top: 15px; font-size: 0.9rem;">
+                    💡 Tip: Lines highlight automatically as you sing along!
+                </p>
+            `;
+
+            // Animate lyrics highlighting (fallback for non-synced)
+            this.animateLyrics();
+        }
     }
 
     showLyricsNotFound(songTitle) {
@@ -666,12 +1000,13 @@ class KaraokeApp {
         document.getElementById('player-container').classList.add('hidden');
         document.getElementById('lyrics-container').classList.add('hidden');
         document.getElementById('results-container').classList.remove('hidden');
-        
+
         // Stop any playing video
         if (this.player && this.player.stopVideo) {
             this.player.stopVideo();
         }
         this.isPlaying = false;
+        this.stopLyricsSync();
     }
 
     hidePlayerAndLyrics() {
@@ -685,6 +1020,7 @@ class KaraokeApp {
             this.player.stopVideo();
         }
         this.isPlaying = false;
+        this.stopLyricsSync();
     }
 
     searchOriginalSong() {
