@@ -310,17 +310,86 @@ class KaraokeApp {
                 playerVars: {
                     'playsinline': 1,
                     'controls': 1,
-                    'modestbranding': 1
+                    'modestbranding': 1,
+                    'rel': 0,
+                    'fs': 1
                 },
                 events: {
                     'onReady': (event) => {
                         console.log('Player ready');
                         this.connectAudioToVisualizer();
                     },
-                    'onStateChange': (event) => this.onPlayerStateChange(event)
+                    'onStateChange': (event) => this.onPlayerStateChange(event),
+                    'onError': (event) => this.onPlayerError(event)
                 }
             });
         }
+    }
+
+    onPlayerError(event) {
+        const errorCode = event.data;
+        console.error('YouTube Player Error:', errorCode);
+
+        let errorMessage = '';
+        let solution = '';
+
+        switch (errorCode) {
+            case 2:
+                errorMessage = 'Invalid video ID';
+                solution = 'Please try a different song';
+                break;
+            case 5:
+                errorMessage = 'Video cannot be played in embedded player';
+                solution = 'This song has embedding restrictions. Opening on YouTube...';
+                this.openVideoInNewTab(this.currentVideoId);
+                return;
+            case 100:
+                errorMessage = 'Video not found or removed';
+                solution = 'Please try a different song';
+                break;
+            case 101:
+            case 150:
+                errorMessage = 'Video cannot be played embedded (copyright restriction)';
+                solution = 'This song has embedding restrictions. Opening on YouTube...';
+                this.openVideoInNewTab(this.currentVideoId);
+                return;
+            case 153:
+                errorMessage = 'Video player configuration error';
+                solution = 'This song may have playback restrictions. Try another song or open on YouTube.';
+                break;
+            default:
+                errorMessage = 'Unknown playback error';
+                solution = 'Please try again or open on YouTube';
+                break;
+        }
+
+        // Show error message to user
+        alert(`🎵 Playback Error (Code: ${errorCode})\n\n${errorMessage}\n\n${solution}`);
+
+        // Add a button to open on YouTube if not already done
+        if (errorCode !== 5 && errorCode !== 101 && errorCode !== 150) {
+            this.showOpenOnYouTubeButton(this.currentVideoId);
+        }
+    }
+
+    openVideoInNewTab(videoId) {
+        window.open(`https://www.youtube.com/watch?v=${videoId}`, '_blank');
+    }
+
+    showOpenOnYouTubeButton(videoId) {
+        const playerContent = document.getElementById('player-content');
+        const existingBtn = document.getElementById('btn-open-youtube');
+
+        if (existingBtn) existingBtn.remove();
+
+        const openBtn = document.createElement('button');
+        openBtn.id = 'btn-open-youtube';
+        openBtn.className = 'karaoke-eq-btn';
+        openBtn.style.marginTop = '15px';
+        openBtn.textContent = '🎬 Open on YouTube';
+        openBtn.addEventListener('click', () => this.openVideoInNewTab(videoId));
+
+        playerContent.appendChild(openBtn);
     }
 
     connectAudioToVisualizer() {
@@ -493,10 +562,16 @@ class KaraokeApp {
 
             // Strategy 1: Try lrclib.net for SYNCED lyrics (with timestamps)
             if (!lyrics && cleanArtist && cleanTitle) {
+                console.log('=== Attempting to fetch SYNCED lyrics ===');
                 const syncedResult = await this.fetchSyncedLyrics(cleanArtist, cleanTitle);
                 if (syncedResult) {
                     lyrics = syncedResult.lyrics;
-                    this.syncedLyrics = syncedResult.lines; // Store synced lyrics
+                    this.syncedLyrics = syncedResult.lines || []; // Store synced lyrics
+                    console.log('Sync status:', {
+                        hasSynced: this.syncedLyrics.length > 0,
+                        lineCount: this.syncedLyrics.length,
+                        firstLine: this.syncedLyrics[0]
+                    });
                 }
             }
 
@@ -620,29 +695,48 @@ class KaraokeApp {
         if (!title) return null;
 
         try {
-            // lrclib.net provides synced lyrics with timestamps (LRC format)
-            const searchUrl = `https://lrclib.net/api/search?track_name=${encodeURIComponent(title)}&artist_name=${encodeURIComponent(artist)}`;
-            console.log('Trying LrcLib for synced lyrics:', searchUrl);
+            // Try multiple search strategies with lrclib.net
+            
+            // Strategy 1: Search by track name and artist
+            let searchUrl = `https://lrclib.net/api/search?track_name=${encodeURIComponent(title)}&artist_name=${encodeURIComponent(artist)}`;
+            console.log('Trying LrcLib search (artist + title):', searchUrl);
 
-            const response = await fetch(searchUrl);
+            let response = await fetch(searchUrl);
+            let data = response.ok ? await response.json() : [];
 
-            if (!response.ok) {
-                return null;
+            // Strategy 2: Try just track name if first search fails
+            if (!data || data.length === 0) {
+                searchUrl = `https://lrclib.net/api/search?track_name=${encodeURIComponent(title)}`;
+                console.log('Trying LrcLib search (title only):', searchUrl);
+                response = await fetch(searchUrl);
+                data = response.ok ? await response.json() : [];
             }
 
-            const data = await response.json();
-
             if (data && data.length > 0) {
+                console.log(`LrcLib found ${data.length} results`);
+                
                 // Find the best match with synced lyrics
                 for (const track of data) {
                     if (track.syncedLyrics) {
-                        console.log('✓ Found synced lyrics on LrcLib');
+                        console.log('✓ Found synced lyrics on LrcLib:', track.trackName);
                         return {
                             lyrics: track.plainLyrics || track.name,
                             lines: this.parseLRC(track.syncedLyrics)
                         };
                     }
                 }
+                
+                // If no synced lyrics, return plain lyrics anyway
+                const bestMatch = data[0];
+                if (bestMatch.plainLyrics) {
+                    console.log('✓ Found plain lyrics on LrcLib (not synced)');
+                    return {
+                        lyrics: bestMatch.plainLyrics,
+                        lines: []
+                    };
+                }
+            } else {
+                console.log('LrcLib: No results found');
             }
 
             return null;
@@ -653,34 +747,67 @@ class KaraokeApp {
     }
 
     parseLRC(lrcText) {
-        // Parse LRC format: [mm:ss.xx] lyric text
+        // Parse LRC format: [mm:ss.xx] lyric text or [mm:ss.xx] or [mm:ss:xx]
         const lines = [];
-        const regex = /\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)/g;
-        let match;
+        
+        // Support multiple LRC formats
+        const patterns = [
+            /\[(\d{2}):(\d{2})\.(\d{2,3})\]\s*(.*)/,  // [00:12.34] text
+            /\[(\d{2}):(\d{2})\.(\d{2,3})\]\s*$/,      // [00:12.34] (empty line)
+            /\[(\d{2}):(\d{2}):(\d{2,3})\]\s*(.*)/,    // [00:12:34] text (alternative format)
+        ];
 
-        while ((match = regex.exec(lrcText)) !== null) {
-            const minutes = parseInt(match[1]);
-            const seconds = parseInt(match[2]);
-            const milliseconds = parseInt(match[3].padEnd(3, '0'));
-            const time = minutes * 60 + seconds + milliseconds / 1000;
-            const text = match[4].trim();
+        const lrcLines = lrcText.split('\n');
 
-            if (text) {
-                lines.push({ time, text });
+        for (const line of lrcLines) {
+            const trimmedLine = line.trim();
+            if (!trimmedLine || trimmedLine.startsWith('[by:') || trimmedLine.startsWith('[ar:') || 
+                trimmedLine.startsWith('[ti:') || trimmedLine.startsWith('[al:') || trimmedLine.startsWith('[offset:')) {
+                continue; // Skip metadata
+            }
+
+            // Try each pattern
+            let match = null;
+            for (const pattern of patterns) {
+                match = pattern.exec(trimmedLine);
+                if (match) break;
+            }
+
+            if (match) {
+                const minutes = parseInt(match[1]);
+                const seconds = parseInt(match[2]);
+                const milliseconds = parseInt(match[3].padEnd(3, '0'));
+                const time = minutes * 60 + seconds + milliseconds / 1000;
+                const text = match[4] ? match[4].trim() : '';
+
+                if (text) {
+                    lines.push({ time, text });
+                }
             }
         }
 
-        console.log('Parsed', lines.length, 'lyric lines with timestamps');
+        if (lines.length > 0) {
+            console.log(`✓ Parsed ${lines.length} synced lyric lines`);
+            console.log('First few lines:', lines.slice(0, 3));
+        } else {
+            console.log('✗ No valid LRC lines found');
+        }
+
         return lines;
     }
 
     startLyricsSync() {
-        if (!this.player || !this.syncedLyrics || this.syncedLyrics.length === 0) {
+        if (!this.player) {
+            console.log('No player available');
+            return;
+        }
+
+        if (!this.syncedLyrics || this.syncedLyrics.length === 0) {
             console.log('No synced lyrics available');
             return;
         }
 
-        console.log('Starting lyrics sync with', this.syncedLyrics.length, 'lines');
+        console.log('✓ Starting lyrics sync with', this.syncedLyrics.length, 'lines');
         this.currentLyricIndex = 0;
 
         // Clear existing interval
@@ -693,7 +820,7 @@ class KaraokeApp {
     }
 
     updateSyncedLyrics() {
-        if (!this.player || !this.syncedLyrics.length) return;
+        if (!this.player || !this.syncedLyrics || !this.syncedLyrics.length) return;
 
         try {
             const currentTime = this.player.getCurrentTime();
@@ -713,6 +840,11 @@ class KaraokeApp {
             if (newIndex !== this.currentLyricIndex) {
                 this.currentLyricIndex = newIndex;
                 this.highlightCurrentLyric(newIndex);
+                
+                // Debug log every 10 lines
+                if (newIndex % 10 === 0) {
+                    console.log(`Lyrics sync: Line ${newIndex}/${lines.length}, Time: ${currentTime.toFixed(1)}s`);
+                }
             }
         } catch (error) {
             console.log('Lyrics sync error:', error);
@@ -931,6 +1063,8 @@ class KaraokeApp {
 
         if (this.syncedLyrics.length > 0) {
             // Display synced lyrics with timestamps
+            console.log(`✓ Displaying ${this.syncedLyrics.length} synced lyric lines`);
+            
             const lyricLines = this.syncedLyrics.map((line, index) =>
                 `<p class="lyric-line ${index === 0 ? 'active' : ''}" data-time="${line.time}">${this.escapeHtml(line.text)}</p>`
             ).join('');
@@ -941,14 +1075,16 @@ class KaraokeApp {
                     ${lyricLines}
                 </div>
                 <p class="hint" style="margin-top: 15px; font-size: 0.9rem;">
-                    💡 Lyrics are synced with the music!
+                    ✅ Lyrics are synced with the music! Press play and watch them highlight!
                 </p>
             `;
 
             // Start sync when video plays
             this.startLyricsSync();
         } else {
-            // Display plain lyrics (no sync)
+            // Display plain lyrics (no sync available)
+            console.log('✗ No synced lyrics found, showing plain text');
+            
             const lines = lyricsText.split('\n')
                 .map(line => line.trim())
                 .filter(line => line.length > 0);
@@ -958,12 +1094,12 @@ class KaraokeApp {
             ).join('');
 
             lyricsDisplay.innerHTML = `
-                <h3>🎵 Lyrics</h3>
+                <h3>🎵 Lyrics (Plain Text)</h3>
                 <div class="demo-lyrics">
                     ${lyricLines}
                 </div>
                 <p class="hint" style="margin-top: 15px; font-size: 0.9rem;">
-                    💡 Tip: Lines highlight automatically as you sing along!
+                    ⚠️ Synced lyrics not available for this song. Showing plain text only.
                 </p>
             `;
 
