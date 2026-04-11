@@ -43,14 +43,6 @@ class KaraokeApp {
         }
     }
 
-    async searchWithQuery(query, appendKaraoke = true) {
-        // Set the search input value
-        document.getElementById('search-input').value = query;
-        
-        // Perform search
-        await this.search(query, appendKaraoke);
-    }
-    
     setupEventListeners() {
         const searchInput = document.getElementById('search-input');
         const searchButton = document.getElementById('search-button');
@@ -209,7 +201,8 @@ class KaraokeApp {
         this.loadLyrics(title, artist);
         
         // Push state for player so back button returns to search results
-        history.pushState({ page: 'player', videoId, title, artist }, '', `?play=${videoId}`);
+        const stateUrl = `?play=${videoId}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`;
+        history.pushState({ page: 'player', videoId, title, artist }, '', stateUrl);
     }
     
     initPlayer(videoId) {
