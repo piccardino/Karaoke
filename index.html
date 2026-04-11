@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Karaoke Night 🎤</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="three-container"></div>
+    
+    <div id="app-container">
+        <header>
+            <h1>🎤 Karaoke Night</h1>
+        </header>
+        
+        <div id="search-container">
+            <input type="text" id="search-input" placeholder="Search for songs on YouTube...">
+            <button id="search-button">Search</button>
+        </div>
+        
+        <div id="results-container" class="hidden"></div>
+        
+        <div id="player-container" class="hidden">
+            <div id="video-player"></div>
+            <div id="now-playing">
+                <h2 id="song-title"></h2>
+                <p id="song-artist"></p>
+            </div>
+            <div id="controls">
+                <button id="btn-play">▶ Play</button>
+                <button id="btn-pause">⏸ Pause</button>
+                <button id="btn-stop">⏹ Stop</button>
+            </div>
+        </div>
+        
+        <div id="lyrics-container" class="hidden">
+            <div id="lyrics-display"></div>
+        </div>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="visualizer.js"></script>
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
