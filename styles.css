@@ -291,6 +291,12 @@ header h1 {
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    transition: all 0.3s ease;
+}
+
+#now-playing h2:hover {
+    opacity: 0.7;
+    transform: scale(1.02);
 }
 
 #now-playing p {

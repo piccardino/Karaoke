@@ -77,6 +77,7 @@ class KaraokeApp {
         document.getElementById('bass-volume').addEventListener('input', (e) => this.updateEQ());
         document.getElementById('btn-karaoke-mode').addEventListener('click', () => this.toggleKaraokeEQ());
         document.getElementById('btn-mic').addEventListener('click', () => this.enableMicrophone());
+        document.getElementById('song-title').addEventListener('click', () => this.goHome());
 
         // Handle browser back button
         window.addEventListener('popstate', (e) => {
@@ -1021,6 +1022,24 @@ class KaraokeApp {
         }
         this.isPlaying = false;
         this.stopLyricsSync();
+    }
+
+    goHome() {
+        // Reset everything and go to home page
+        this.hidePlayerAndLyrics();
+
+        // Clear search
+        document.getElementById('search-input').value = '';
+        this.allResults = [];
+        this.currentPage = 0;
+        this.currentQuery = '';
+        this.syncedLyrics = [];
+        this.currentLyricIndex = 0;
+
+        // Clear URL
+        history.pushState({ page: 'home' }, '', window.location.pathname);
+
+        console.log('✓ Returned to home');
     }
 
     searchOriginalSong() {
