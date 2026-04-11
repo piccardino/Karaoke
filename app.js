@@ -64,6 +64,9 @@ class KaraokeApp {
             if (e.key === 'Enter') this.search();
         });
 
+        // Header title click to go home
+        document.querySelector('header h1').addEventListener('click', () => this.goHome());
+
         // Player controls
         document.getElementById('btn-play').addEventListener('click', () => this.play());
         document.getElementById('btn-pause').addEventListener('click', () => this.pause());
