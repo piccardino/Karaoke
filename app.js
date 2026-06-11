@@ -19,6 +19,9 @@ class KaraokeApp {
         this.scorer = new Scorer();
         this.isRecording = false;
         this.expectedNotes = [];
+        this.recognition = null;
+        this.lyricsAccuracy = { total: 0, match: 0 };
+        this.lastRecognizedText = '';
 
         this.player = null;
         this.currentVideoId = null;
@@ -215,12 +218,18 @@ class KaraokeApp {
             case 'start-recording':
                 this.isRecording = true;
                 this.scorer.reset();
+                this.lyricsAccuracy = { total: 0, match: 0 };
+                this.lastRecognizedText = '';
                 if (this.role === 'guest') {
                     document.getElementById('btn-start-singing').classList.add('recording');
                     document.getElementById('btn-start-singing').textContent = '🔴 In Corso...';
                     this.streamMicToHost();
+                    this.startSpeechRecognition(); // Guest: trascrive localmente
                 } else {
                     document.getElementById('pitch-indicator').textContent = '🎤 In registrazione...';
+                    document.getElementById('speech-text').textContent = '🗣️ In ascolto...';
+                    document.getElementById('text-accuracy').textContent = '0%';
+                    document.getElementById('text-accuracy-bar').style.width = '0%';
                 }
                 break;
             case 'stop-recording':
@@ -229,8 +238,16 @@ class KaraokeApp {
                     document.getElementById('btn-start-singing').classList.remove('recording');
                     document.getElementById('btn-start-singing').textContent = '🎤 Inizia a Cantare';
                     document.getElementById('phone-status').textContent = '✅ Fatto! Controlla il punteggio!';
+                    this.stopSpeechRecognition();
                 } else {
                     document.getElementById('pitch-indicator').textContent = '⏹ Registrazione ferma';
+                }
+                break;
+            case 'transcribed-text': // Guest → Host: testo riconosciuto
+                if (this.role === 'host') {
+                    this.lastRecognizedText = data.text;
+                    const time = this.ytPlayer ? this.ytPlayer.getCurrentTime() : 0;
+                    this.checkLyricsMatch(data.text, time);
                 }
                 break;
         }
@@ -246,6 +263,85 @@ class KaraokeApp {
                 alert('Servono i permessi del microfono per cantare!');
                 console.error(err);
             });
+    }
+
+    startSpeechRecognition() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            console.log('Speech recognition not supported');
+            return;
+        }
+        this.recognition = new SpeechRecognition();
+        this.recognition.lang = 'en-US';
+        this.recognition.continuous = true;
+        this.recognition.interimResults = true;
+
+        this.recognition.onresult = (event) => {
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const transcript = event.results[i][0].transcript.toLowerCase().trim();
+                if (event.results[i].isFinal) {
+                    this.lastRecognizedText = transcript;
+                    // Guest: invia il testo trascritto all'host via PeerJS
+                    if (this.role === 'guest') {
+                        this.sendMessage({ type: 'transcribed-text', text: transcript });
+                    } else {
+                        // Host locale: confronta direttamente
+                        const time = this.ytPlayer ? this.ytPlayer.getCurrentTime() : 0;
+                        this.checkLyricsMatch(transcript, time);
+                    }
+                }
+            }
+        };
+
+        this.recognition.onerror = (e) => {
+            console.log('Speech error:', e.error);
+            if (e.error === 'not-allowed') {
+                document.getElementById('speech-text').textContent = '⚠️ Microfono non accessibile';
+            }
+        };
+
+        try { this.recognition.start(); } catch (e) {}
+    }
+
+    stopSpeechRecognition() {
+        if (this.recognition) {
+            try { this.recognition.stop(); } catch (e) {}
+            this.recognition = null;
+        }
+    }
+
+    getCurrentLyricLine(time) {
+        if (!this.syncedLyrics || !this.syncedLyrics.length) return null;
+        let line = null;
+        for (const l of this.syncedLyrics) {
+            if (l.time <= time) line = l;
+            else break;
+        }
+        return line ? line.text.toLowerCase().replace(/[^a-zA-Z0-9\s]/g, '').trim() : null;
+    }
+
+    checkLyricsMatch(transcribed, time) {
+        const expected = this.getCurrentLyricLine(time);
+        if (!expected || !transcribed) return;
+
+        const cleanTranscribed = transcribed.replace(/[^a-zA-Z0-9\s]/g, '').trim();
+        const cleanExpected = expected.replace(/[^a-zA-Z0-9\s]/g, '').trim();
+
+        if (!cleanTranscribed || !cleanExpected) return;
+
+        this.lyricsAccuracy.total++;
+        const tWords = cleanTranscribed.split(/\s+/);
+        const eWords = cleanExpected.split(/\s+/);
+        let matched = 0;
+        for (const tw of tWords) {
+            if (eWords.some(ew => ew.includes(tw) || tw.includes(ew))) matched++;
+        }
+        const ratio = matched / Math.max(tWords.length, eWords.length);
+        if (ratio > 0.5) this.lyricsAccuracy.match++;
+
+        const pct = Math.round((this.lyricsAccuracy.match / this.lyricsAccuracy.total) * 100);
+        document.getElementById('text-accuracy').textContent = `${pct}%`;
+        document.getElementById('text-accuracy-bar').style.width = `${pct}%`;
     }
 
     startPitchDetection() {
@@ -442,6 +538,12 @@ class KaraokeApp {
         document.getElementById('results-container').classList.add('hidden');
         document.getElementById('score-value').textContent = '0';
         document.getElementById('score-history').innerHTML = '';
+        document.getElementById('speech-text').textContent = '🗣️ In attesa...';
+        document.getElementById('text-accuracy').textContent = '0%';
+        document.getElementById('text-accuracy-bar').style.width = '0%';
+        this.lyricsAccuracy = { total: 0, match: 0 };
+        this.lastRecognizedText = '';
+        this.stopSpeechRecognition();
 
         this.initPlayer(videoId);
         this.loadLyrics(title, artist);

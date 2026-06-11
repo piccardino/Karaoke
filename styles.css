@@ -786,6 +786,53 @@ header h1:hover {
 #pitch-indicator { font-size: 1.2rem; color: var(--accent); margin-bottom: 10px; }
 #score-history { margin-top: 10px; min-height: 30px; }
 
+/* Speech to text */
+#speech-section {
+    margin-top: 15px;
+    padding: 12px;
+    background: rgba(10, 10, 15, 0.6);
+    border-radius: 10px;
+}
+
+#speech-text {
+    font-size: 1rem;
+    color: var(--accent);
+    margin-bottom: 10px;
+    font-style: italic;
+    min-height: 1.5em;
+}
+
+#text-accuracy-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+#text-accuracy-bar-container {
+    flex: 1;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+#text-accuracy-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--secondary), var(--highlight));
+    border-radius: 4px;
+    transition: width 0.5s ease;
+}
+
+#text-accuracy {
+    font-weight: bold;
+    color: var(--highlight);
+    min-width: 40px;
+    text-align: right;
+}
+
 /* YouTube volume */
 #youtube-volume {
     -webkit-appearance: none;
