@@ -8,72 +8,99 @@
 </head>
 <body>
     <div id="three-container"></div>
-    
+
     <div id="app-container">
         <header>
             <h1>🎤 Karaoke Night</h1>
+            <div id="room-indicator" class="hidden"></div>
         </header>
-        
+
+        <div id="room-section">
+            <div id="room-controls">
+                <button id="btn-create-room" class="room-btn primary">➕ Crea Stanza</button>
+                <div id="join-room-wrapper">
+                    <input type="text" id="room-input" placeholder="ID stanza..." maxlength="20">
+                    <button id="btn-join-room" class="room-btn">🔗 Unisciti</button>
+                </div>
+            </div>
+            <div id="invite-display" class="hidden">
+                <p>📨 Link invito: <span id="invite-link"></span></p>
+                <button id="btn-copy-link">📋 Copia</button>
+                <p id="guest-status">In attesa di connessione...</p>
+            </div>
+        </div>
+
         <div id="search-container">
-            <input type="text" id="search-input" placeholder="Search for songs on YouTube...">
+            <input type="text" id="search-input" placeholder="Cerca una canzone su YouTube...">
             <label id="karaoke-toggle" class="toggle-switch">
                 <input type="checkbox" id="karaoke-mode">
                 <span class="toggle-slider">+Karaoke</span>
             </label>
-            <button id="search-button">Search</button>
+            <button id="search-button">Cerca</button>
         </div>
-        
+
         <div id="results-container" class="hidden"></div>
-        
+
         <div id="player-container" class="hidden">
             <div id="player-header">
                 <div id="now-playing">
-                    <h2 id="song-title" style="cursor: pointer;" title="Click to go back to home"></h2>
+                    <h2 id="song-title" style="cursor: pointer;" title="Torna alla home"></h2>
                     <p id="song-artist"></p>
                 </div>
-                <button id="btn-toggle-player" title="Show/Hide Player">🎬</button>
+                <button id="btn-toggle-player" title="Mostra/Nascondi Player">🎬</button>
             </div>
             <div id="player-content">
                 <div id="video-player"></div>
                 <div id="controls">
                     <button id="btn-play">▶ Play</button>
-                    <button id="btn-pause">⏸ Pause</button>
+                    <button id="btn-pause">⏸ Pausa</button>
                     <button id="btn-stop">⏹ Stop</button>
                 </div>
                 <div id="audio-controls">
                     <div class="eq-control">
-                        <label>🎤 Vocal</label>
-                        <input type="range" id="vocal-volume" min="0" max="100" value="100">
-                        <span id="vocal-value">100%</span>
+                        <label>🎤 Volume YouTube</label>
+                        <input type="range" id="youtube-volume" min="0" max="100" value="100">
+                        <span id="youtube-value">100%</span>
                     </div>
-                    <div class="eq-control">
-                        <label>🎵 Music</label>
-                        <input type="range" id="music-volume" min="0" max="100" value="100">
-                        <span id="music-value">100%</span>
-                    </div>
-                    <div class="eq-control">
-                        <label>🔊 Bass</label>
-                        <input type="range" id="bass-volume" min="0" max="100" value="100">
-                        <span id="bass-value">100%</span>
-                    </div>
-                    <button id="btn-karaoke-mode" class="karaoke-eq-btn" title="Reduce vocals for karaoke">🎤 Karaoke Mode</button>
-                    <button id="btn-mic" class="karaoke-eq-btn" title="Enable microphone for real-time visualizations">🎙️ Enable Mic</button>
+                    <button id="btn-mic" class="karaoke-eq-btn" title="Microfono per visualizzazioni">🎙️ Abilita Mic</button>
                 </div>
             </div>
         </div>
-        
+
+        <div id="scoring-container" class="hidden">
+            <h3>🎯 Punteggio</h3>
+            <div id="score-display">
+                <span id="score-value">0</span><span id="score-total"> / 100</span>
+            </div>
+            <div id="pitch-indicator">🎵 In ascolto...</div>
+            <div id="score-history"></div>
+        </div>
+
         <div id="lyrics-container" class="hidden">
             <div id="lyrics-header">
-                <h3>🎵 Lyrics</h3>
-                <button id="btn-search-original" title="Search for original song on YouTube">🔍 Original</button>
+                <h3>🎵 Testi</h3>
+                <button id="btn-search-original" title="Cerca canzone originale su YouTube">🔍 Originale</button>
             </div>
             <div id="lyrics-display"></div>
         </div>
     </div>
-    
+
+    <div id="phone-ui" class="hidden">
+        <h2>🎤 Canta!</h2>
+        <button id="btn-start-singing">🎤 Inizia a Cantare</button>
+        <p id="phone-status">Connesso! In attesa che l'host selezioni una canzone...</p>
+    </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="visualizer.js"></script>
     <script src="config.js"></script>
+    <script src="pitchy.js"></script>
     <script src="app.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch(() => {});
+        }
+    </script>
 </body>
 </html>
